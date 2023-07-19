@@ -1,88 +1,47 @@
 package main
 
 import (
-    "log"
-    "strconv"
-    "net/http"
+	"log"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
 )
 
-type HealthCheck struct {}
-
 type apiConfig struct {
-    fileServerHits int
+	fileServerHits int
 }
 
 func main() {
-    const port = "8080"
+	const filepathRoot = "."
+	const port = "8080"
 
-    mux := http.NewServeMux()
-    logMux := middlewareLog(mux)
-    corsMux := middlewareCors(logMux)
-    
-    apiCfg := &apiConfig {
-        fileServerHits: 0,
-    }
+	apiCfg := apiConfig{
+		fileServerHits: 0,
+	}
 
-    mux.Handle("/app/", http.StripPrefix("/app/", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
-    mux.Handle("/app/assets/logo.png", http.StripPrefix("/app/", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
-    mux.Handle("/healthz", HealthCheck{})
-    mux.Handle("/healthz2", http.HandlerFunc(health2))
-    mux.Handle("/metrics", http.HandlerFunc(apiCfg.metricHandler))
+	r := chi.NewRouter()
+	fsHandler := apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot))))
+	r.Handle("/app", fsHandler)
+	r.Handle("/app/*", fsHandler)
 
-    srv := &http.Server{
-        Addr: ":" + port,
-        Handler: corsMux,
-    }
+	apiRouter := chi.NewRouter()
+	apiRouter.Get("/healthz", handlerReadiness)
+	apiRouter.Get("/metrics", apiCfg.metricHandler)
+	apiRouter.Post("/validate_chirp", validateChirpHandler)
 
-    log.Printf("Serving on port: %s\n", port)
-    log.Fatal(srv.ListenAndServe())
-}
+	r.Mount("/api", apiRouter)
 
-func middlewareCors(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Access-Control-Allow-Origin", "*")
-        w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE")
-        w.Header().Set("Access-Control-Allow-Headers", "*")
+	adminRouter := chi.NewRouter()
+	adminRouter.Get("/metrics", apiCfg.metricHandlerHtml)
 
-        if r.Method == "OPTIONS" {
-            w.WriteHeader(http.StatusOK)
-            return
-        }
+	r.Mount("/admin", adminRouter)
+	corsMux := middlewareCors(r)
 
-        next.ServeHTTP(w, r)
-    })
-}
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: corsMux,
+	}
 
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        cfg.fileServerHits++
-
-        next.ServeHTTP(w, r)
-    })
-}
-
-func middlewareLog(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        log.Printf("%s %s", r.Method, r.URL.Path)
-        next.ServeHTTP(w, r)
-    })
-}
-
-func (h HealthCheck) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-    w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-    w.WriteHeader(200)
-    w.Write([]byte("Ok"))
-    return
-}
-
-func health2(w http.ResponseWriter, r *http.Request) {
-    w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-    w.WriteHeader(200)
-    w.Write([]byte("OK 2"))
-    return
-}
-
-func (cfg *apiConfig) metricHandler(w http.ResponseWriter, r *http.Request) {
-    w.Write([]byte("Hits: " + strconv.Itoa(cfg.fileServerHits)))
-    return
+	log.Printf("Serving files from %s on port: %s\n", filepathRoot, port)
+	log.Fatal(srv.ListenAndServe())
 }
