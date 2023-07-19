@@ -11,42 +11,43 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
         Body string `json:"body"`
     }
 
-    type returnErrorVals struct {
-        Error string `json:"error"`
-    }
-
-    type returnSuccessVals struct {
-        CleanedBody string `json:"cleaned_body"`
-    }
-
     decoder := json.NewDecoder(r.Body)
     params := parameters{}
     err := decoder.Decode(&params)
 
-
     if err != nil {
-        respBody := returnErrorVals{Error: "Couldn't decode parameters"}
-        code := http.StatusInternalServerError
-        data, _ := json.Marshal(respBody)
-
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(code)
-        w.Write(data)
+        respondeWithError(w, http.StatusInternalServerError, "Couldn't decode parameters")
         return
     }
 
 
     if len(params.Body) > 140 {
-        respBody := returnErrorVals{Error: "Chirp is too long"}
-        data, _ := json.Marshal(respBody)
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusBadRequest)
-        w.Write(data)
+        respondeWithError(w, http.StatusBadRequest, "Chirp is too long")
         return
     }
 
+    msg := removeBadWords(params.Body)
+
+    respondeSuccess(w, http.StatusOK, msg)
+    return
+}
+
+func respondeWithError(w http.ResponseWriter, code int, msg string) {
+    type returnErrorVals struct {
+        Error string `json:"error"`
+    }
+    
+    respBody := returnErrorVals{Error: msg}
+    data, _ := json.Marshal(respBody)
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(code)
+    w.Write(data)
+    return
+}
+
+func removeBadWords(body string) string {
     badWords := map[string]string{"kerfuffle": "kerfuffle", "sharbert": "sharbert", "fornax": "fornax"}
-    words := strings.Split(params.Body, " ")
+    words := strings.Split(body, " ")
     finalString := make([]string, 0)
 
     for _, word := range words {
@@ -58,8 +59,13 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
         finalString = append(finalString, word)
     }
 
-    msg := strings.Join(finalString, " ")
+    return strings.Join(finalString, " ")
+}
 
+func respondeSuccess(w http.ResponseWriter, code int, msg string) {
+    type returnSuccessVals struct {
+        CleanedBody string `json:"cleaned_body"`
+    }
 
     respBody := returnSuccessVals{CleanedBody: msg}
     data, _ := json.Marshal(respBody)
@@ -68,4 +74,3 @@ func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
     w.Write(data)
     return
 }
-
